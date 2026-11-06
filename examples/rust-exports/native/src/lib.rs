@@ -4,10 +4,12 @@
 //! the specifier of the set below (`nsh.json` `"rust": "native"`), and
 //! their TypeScript declarations are generated from these types into
 //! `.nsh/types/rust-exports/native.d.ts`. On the desktops the crate also
-//! registers a native component (`meter.rs`), which `App.tsx` declares with
-//! `nativeComponent`.
+//! registers native components (`meter.rs`, `chunk_probe.rs`), which
+//! `App.tsx` declares with `nativeComponent`.
 
 mod account;
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+mod chunk_probe;
 mod gauge;
 mod ledger;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
@@ -35,16 +37,19 @@ fn native(registry: &mut Registry) {
 #[native_components(windows)]
 fn components(components: &nsh_platform_windows::Components) {
     meter::register(components);
+    chunk_probe::register(components);
 }
 
 /// The crate's native components on macOS.
 #[native_components(macos)]
 fn components(components: &nsh_platform_macos::Components) {
     meter::register(components);
+    chunk_probe::register(components);
 }
 
 /// The crate's native components on Linux.
 #[native_components(linux)]
 fn components(components: &nsh_platform_linux::Components) {
     meter::register(components);
+    chunk_probe::register(components);
 }

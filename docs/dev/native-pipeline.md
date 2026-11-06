@@ -201,6 +201,7 @@ promise is QuickJS's. A chunk that cannot be loaded rejects the imports that nee
 import asks again. Ids are checked to be plain file names before anything is asked for: the app's code (untrusted)
 cannot make the web page fetch another URL. Chunks a `nsh_engine::Bundle` carries (`Bundle::chunks`) are given before
 the entry runs, so hosts that have them all (tests, native) never ask; `MountSink::load_chunk` defaults to refusing.
+On Windows, macOS and Linux, an embedding app's native component can also supply a verified chunk to its current Engine through `ComponentContext::chunk_loaded`, or report failure with `chunk_failed`. That host-trusted path adds a module without replacing the app or creating another Engine; the Engine's policy stays its own.
 
 Development bundles (CommonJS, one chunk per module) need nothing: rolldown renders `import("./Screen")` as
 `Promise.resolve().then(() => require("./Screen.js"))`, served by the hot runtime.

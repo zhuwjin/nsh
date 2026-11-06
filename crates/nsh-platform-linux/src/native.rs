@@ -45,7 +45,7 @@ use nsh_core::{
     Bounds, Command, EventKind, EventPayload, JsonValue, NativeProps, NodeId, PayloadValue, Points,
     ResizeMode, Size, VideoProps, ViewKind, geometry::Point,
 };
-use nsh_engine::EngineControl;
+use nsh_engine::{Chunk, EngineControl};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{image::AssetBase, surface::Surface, view::NshView};
@@ -137,6 +137,18 @@ impl ComponentContext {
     pub fn set_size(&self, width: f32, height: f32) {
         self.control
             .set_component_size(self.id, Size::new(Points(width), Points(height)));
+    }
+
+    /// Hands a chunk to this component's Engine. Imports waiting for it
+    /// continue; a later import finds it already present. From any thread.
+    pub fn chunk_loaded(&self, chunk: Chunk) {
+        self.control.chunk_loaded(chunk);
+    }
+
+    /// Tells the Engine that chunk `id` could not be loaded, rejecting its
+    /// pending imports. A later import asks for it again.
+    pub fn chunk_failed(&self, id: String, message: String) {
+        self.control.chunk_failed(id, message);
     }
 }
 

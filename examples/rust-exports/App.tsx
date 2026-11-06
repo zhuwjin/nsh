@@ -3,7 +3,7 @@
 // (`native/`, nsh.json "rust"), imported by its specifier. Their types are
 // generated from the Rust code into `.nsh/types/rust-exports/native.d.ts`.
 // On the desktops the crate also registers a native component, `Meter`.
-import { type JSX, mount, nativeComponent, Scroll, signal, Text, View } from "nsh";
+import { type JSX, mount, nativeComponent, type NativeComponentRef, Scroll, signal, Text, View } from "nsh";
 import { Button as BaseButton } from "nsh/base";
 import { Account, Gauge, Ledger } from "rust-exports/native";
 
@@ -17,6 +17,14 @@ const checking = Account.parse("Checking: 40");
  * it is an empty view.
  */
 const Meter = nativeComponent<{ value: number }>("rust-exports.meter", { props: ["value"] });
+
+const ChunkProbe = nativeComponent<{}, { ready: { chunkId: string } }>("rust-exports.chunk-probe", {
+  props: [],
+  events: ["ready"],
+});
+
+const importChunk = (id: string): Promise<{ message: () => string }> =>
+  (globalThis as any).__nsh_import(id, []);
 
 /** A statement of a throwaway account: `using` frees it at the end of the block. */
 function preview(): string {
@@ -83,10 +91,25 @@ function App() {
   // The component: controlled by `spent`, which its event updates.
   const spent = signal(25);
   const changes = signal(0);
+  const chunkMessage = signal("Chunk not loaded");
+  let chunkProbe: NativeComponentRef | undefined;
 
   return (
     <View style={{ flex: 1, paddingTop: "env(safe-area-inset-top)", paddingRight: "env(safe-area-inset-right)", paddingBottom: "env(safe-area-inset-bottom)", paddingLeft: "env(safe-area-inset-left)" }}>
       <Scroll contentStyle={{ padding: 16, gap: 16 }}>
+        <Card title="Runtime chunks">
+          <Button title="Load chunk" variant="secondary" onPress={() => chunkProbe?.command("load", null)} />
+          <ChunkProbe
+            ref={(node) => { chunkProbe = node; }}
+            onReady={({ chunkId }) => {
+              void importChunk(chunkId)
+                .then((module) => chunkMessage.set(module.message()))
+                .catch((cause: unknown) => chunkMessage.set(String(cause)));
+            }}
+          />
+          <Text testID="chunk-probe-result">{chunkMessage()}</Text>
+        </Card>
+
         <Card title="Ledger · a module">
           <Line>{`Formatted at once: ${Ledger.format(1234.5)}`}</Line>
           <Line muted>{copied()}</Line>

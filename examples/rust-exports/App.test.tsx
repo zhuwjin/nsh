@@ -22,3 +22,11 @@ test("the class keeps its state in Rust", async () => {
   await app.waitFor("Accrued: $116.15");
   expect(app.texts()).toContain("Savings: $116.15");
 });
+
+test("loads a delivered chunk into the current Engine", async () => {
+  const app = await open("./App.tsx");
+  if (await app.screenshot().catch(() => null) === null) return;
+  await app.press("Load chunk");
+  await app.waitFor("Chunk loaded in the host Engine");
+  await app.screenshot("target/chunk-probe-loaded.png");
+});

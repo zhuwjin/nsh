@@ -6182,6 +6182,7 @@ dependencies = [
  "nsh-platform-macos",
  "nsh-platform-windows",
  "nsh-testing",
+ "serde_json",
 ]
 
 [[package]]

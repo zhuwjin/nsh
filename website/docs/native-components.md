@@ -34,6 +34,8 @@ there is no layering problem, it clips, scrolls and receives touches like a `<Vi
 4. The component receives every prop right after it is made, then each prop again when it changes.
 5. The component emits events and may report its own size; the app calls its commands through a `ref`.
 
+On Windows, macOS and Linux, `ComponentContext::chunk_loaded` also hands a verified chunk to the same Engine, from any thread. `chunk_failed` reports a load failure. This is for trusted host code loading modules into the current runtime; it does not change the Engine's capabilities or create another VM.
+
 ## Using the component in the app
 
 In Rust, `native(name)` makes the element: `.prop(name, value)` gives it a prop (a `serde_json::Value`, or a signal or a

@@ -57,7 +57,7 @@ mod window;
 pub use gtk4;
 pub use nsh_core::platform::{Appearance, Locale};
 pub use nsh_engine::{
-    App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Limits, Root,
+    App, Bundle, ByteSize, CacheLocation, CacheOptions, CachePolicy, Chunk, Limits, Root,
 };
 
 #[cfg(feature = "dev")]

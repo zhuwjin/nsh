@@ -28,6 +28,8 @@ NSH 本身就用系统原生视图渲染，所以原生组件只是同一视图�
 4. 组件创建后会立即收到所有 props，之后每当某个 prop 变化时再收到该 prop。
 5. 组件可以发出事件、上报自身尺寸；应用通过 `ref` 调用它的命令。
 
+在 Windows、macOS 和 Linux 上，`ComponentContext::chunk_loaded` 还支持从任意线程把经过验证的 Chunk 交给所属 Engine，`chunk_failed` 则用于报告加载失败。这适用于受信任的宿主代码将模块加载到当前运行时，不会改变 Engine 的 capabilities，也不会创建另一个 VM。
+
 ## 在应用中使用组件
 
 在 Rust 中，`native(name)` 创建这个元素：`.prop(name, value)` 给它一个 prop（`serde_json::Value`，或者它的 signal 或闭包，变化时重新发送），
