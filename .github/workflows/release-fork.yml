@@ -1,0 +1,209 @@
+name: Release fork build
+
+# Fork-only workflow: builds this fork's own binaries from the commit the run
+# is started on and publishes them as one rolling prerelease. It is the only
+# CI file the fork adds, and it touches no workflow of `longbridge/nsh`, so
+# syncing from upstream neither conflicts nor breaks it: a merge brings
+# upstream's workflows in and leaves this one where it is.
+#
+# - Run it by hand: Actions -> "Release fork build" -> Run workflow, on any
+#   branch. `workflow_dispatch` checks out that branch's latest commit, so a
+#   run always releases what `main` holds at that moment; no tag is needed.
+# - It publishes the tag `local`, replacing the previous run's assets under the
+#   same names, so a download URL never changes:
+#     https://github.com/<owner>/nsh/releases/download/local/nsh-macos-arm64.tar.gz
+#     https://github.com/<owner>/nsh/releases/download/local/nsh-windows-x86_64.zip
+#   The release is a prerelease on purpose: upstream's Release workflow reacts
+#   to a published release by rebuilding the nightly from main, and skips
+#   prereleases, so publishing here never sets off a six-platform build.
+# - With `publish` off it uploads workflow artifacts only: a dry run of a
+#   change to this file, or to how xtask builds the distribution.
+#
+# The build mirrors upstream's `dist` job in `.github/workflows/release.yml`
+# (same environment, same steps). After a sync that changed either, diff the
+# two and copy what moved:
+#   gh api repos/longbridge/nsh/contents/.github/workflows/release.yml \
+#     --jq .content | base64 -d | less
+#
+# Left out on purpose: the Linux and the macos-x86_64 and windows-arm64 builds,
+# the shared Android and web runtimes (upstream builds those on x86_64 Linux
+# only), the embedding SDKs, and the installers and Scoop manifest, which
+# download from `longbridge/nsh` (`website/public/install.*` and
+# `nsh-cli/src/self_update.rs` name that repository), not from this fork.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the archives as the `local` prerelease; off: artifacts only"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-fork
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # What to build is the branch the run was started on, at its latest commit:
+  # actions/checkout@v4 checks out `github.sha`, the revision of the event.
+  dist:
+    name: dist (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-15
+          - name: windows-x86_64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Temporary directories (tests, tools) outside the checkout.
+      - name: Set up the environment
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          echo "TMPDIR=$RUNNER_TEMP/tmp" >> "$GITHUB_ENV"
+          echo "ARCHIVE=nsh-${{ matrix.name }}" >> "$GITHUB_ENV"
+
+      - name: Set up Windows
+        if: runner.os == 'Windows'
+        run: |
+          # QuickJS is C: bindgen needs libclang, which the image's LLVM has.
+          echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+          # rustc can overflow its default stack on the `windows` crate.
+          echo "RUST_MIN_STACK=268435456" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-release-fork-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-release-fork-cargo-
+            ${{ runner.os }}-release-cargo-
+
+      # The release profile's fat LTO over one codegen unit links each of the
+      # distribution's ~15 executables single-threaded: thin LTO over 16 units
+      # takes a fraction of that for little run-time cost (upstream's
+      # release.yml, and `docs/dev/web.md` for the web profile). The Android
+      # and web runtimes are skipped: neither is in this release, and building
+      # them on these runners was 40 to 65 minutes thrown away.
+      - name: Build the distribution
+        env:
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_WEB_LTO: fat
+          CARGO_PROFILE_WEB_CODEGEN_UNITS: "1"
+          NSH_CHANNEL: stable
+          NSH_DIST_NO_ANDROID: "1"
+          NSH_DIST_NO_WEB: "1"
+        run: cargo xtask dist -v
+
+      # The packaged CLI makes and bundles a new app.
+      - name: Smoke test
+        run: |
+          nsh=dist/nsh/bin/nsh
+          [[ "$RUNNER_OS" != Windows ]] || nsh=dist/nsh/bin/nsh.exe
+          "$nsh" --version
+          app="$RUNNER_TEMP/smoke-app"
+          "$nsh" init "$app"
+          "$nsh" build "$app" -o "$RUNNER_TEMP/smoke-out" --release
+          ls "$RUNNER_TEMP/smoke-out"
+          find dist/nsh -type f | sort
+
+      - name: Package
+        run: |
+          rm -rf target/release-assets
+          mkdir -p target/release-assets
+          cd target/release-assets
+          cp -R ../../dist/nsh nsh
+          cp ../../README.md ../../LICENSE-APACHE nsh/
+          # The embedding SDKs are not released here; the CLI's archive holds
+          # none either.
+          rm -rf nsh/embed
+          # The runtimes of other platforms than this machine's are components
+          # (`nsh component`), each an archive of its own.
+          nsh=nsh/bin/nsh
+          [[ "$RUNNER_OS" != Windows ]] || nsh=nsh/bin/nsh.exe
+          "$nsh" component pack --out .
+          # The shared components come from x86_64 Linux, which is not built
+          # here: an installed nsh downloads them from longbridge/nsh.
+          rm -f nsh-android.tar.gz nsh-android-symbols.tar.gz nsh-web.tar.gz
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            7z a -tzip "$ARCHIVE.zip" nsh > /dev/null
+          else
+            tar -czf "$ARCHIVE.tar.gz" nsh
+          fi
+          rm -rf nsh
+          for asset in *.tar.gz *.zip; do
+            [[ -e "$asset" ]] || continue
+            if [[ "$RUNNER_OS" == Windows ]]; then
+              sha256sum "$asset" > "$asset.sha256"
+            else
+              shasum -a 256 "$asset" > "$asset.sha256"
+            fi
+          done
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nsh-${{ matrix.name }}
+          path: target/release-assets/*
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: dist
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nsh-*
+          path: assets
+          merge-multiple: true
+
+      # The `local` release is replaced, not added to, so its assets always
+      # name the fork's newest build: delete it with its tag and make it again
+      # at this commit. `gh release create` uploads to a draft and publishes it
+      # once all the assets are up, so it is missing only during that upload.
+      - name: Publish the local release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          short="${SHA:0:7}"
+          date=$(date -u +%Y-%m-%d)
+          ls -l assets
+          notes=$(cat <<NOTES
+          Built by the "Release fork build" workflow from [\`$short\`](https://github.com/$GH_REPO/commit/$SHA) on $date: macOS Apple silicon and Windows x86_64, each with its runtime components. Every run replaces this release.
+
+          Only the platforms of the two builds are here; the shared Android and web components still come from [longbridge/nsh](https://github.com/longbridge/nsh), which is where an installed nsh looks for them.
+          NOTES
+          )
+          gh release delete local --cleanup-tag --yes 2> /dev/null || true
+          gh release create local assets/* --target "$SHA" --prerelease --latest \
+            --title "nsh local $date ($short)" --notes "$notes"
